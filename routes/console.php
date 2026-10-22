@@ -9,3 +9,6 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('reports:refresh-summaries')->everyFiveMinutes()->withoutOverlapping();
+
+Schedule::command('email:poll-inbound')->everyMinute()->withoutOverlapping();
+Schedule::command('email:prune-inbound-log')->daily();

@@ -12,6 +12,7 @@
         "laravel/tinker": "^2.9",
         "nwidart/laravel-modules": "^13.0",
         "spatie/laravel-permission": "^6.25",
+        "webklex/php-imap": "^6.2",
         "wikimedia/composer-merge-plugin": "*"
     },
     "require-dev": {

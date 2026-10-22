@@ -4,9 +4,19 @@ namespace Modules\Support\Providers;
 
 use Nwidart\Modules\Support\ModuleServiceProvider;
 use Illuminate\Console\Scheduling\Schedule;
+use Modules\Core\Permissions\PermissionCatalogue;
 
 class SupportServiceProvider extends ModuleServiceProvider
 {
+    public function boot(): void
+    {
+        parent::boot();
+
+        $this->app->make(PermissionCatalogue::class)->register('Support', [
+            'support.tickets.view_all',
+        ]);
+    }
+
     /**
      * The name of the module.
      */

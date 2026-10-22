@@ -7,6 +7,7 @@ namespace Modules\Core\Providers;
 use App\Kernel\Contracts\DashboardWidgetRegistrar;
 use App\Kernel\Contracts\EmailSender;
 use App\Kernel\Contracts\ExtensionPointRegistrar;
+use App\Kernel\Contracts\InboundRecordTypeRegistrar;
 use App\Kernel\Contracts\PartyDirectory;
 use App\Kernel\Contracts\ProvisionsTenantAdmin;
 use App\Kernel\Contracts\RecordMetadataStore;
@@ -20,6 +21,8 @@ use App\Tenancy\TenantContextSet;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
+use Modules\Core\Console\PollInboundMailboxCommand;
+use Modules\Core\Console\PruneInboundLogCommand;
 use Modules\Core\Console\RefreshSummariesCommand;
 use Modules\Core\Dashboard\DashboardRegistry;
 use Modules\Core\Email\EmailGateway;
@@ -30,6 +33,10 @@ use Modules\Core\Email\SmtpConnectionTester;
 use Modules\Core\Email\SmtpHostGuard;
 use Modules\Core\Email\SymfonySmtpConnectionTester;
 use Modules\Core\Extensions\ExtensionPointRegistry;
+use Modules\Core\Inbound\ImapMailbox;
+use Modules\Core\Inbound\InboundEmailRouter;
+use Modules\Core\Inbound\InboundRecordTypeRegistry;
+use Modules\Core\Inbound\WebklexImapMailbox;
 use Modules\Core\Notifications\HandleNotificationRequested;
 use Modules\Core\Notifications\NotificationEmailSender;
 use Modules\Core\Notifications\NotificationTypeRegistry;
@@ -53,11 +60,14 @@ use Modules\Core\Theming\ThemeService;
 use Modules\Core\Usage\RecordUsageListener;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
+use App\Kernel\Dtos\ModuleStateChanged;
+use Modules\Core\Permissions\PermissionCatalogue;
 
 /**
- * Adds outbound email (CoreEmailIntegration).
- * Adds the dashboard widget registry and the reporting pipeline.
- * Adds the Party directory and terminology bindings, plus (from overlay 6) the settings/notification registries, theme setting keys,
+ * REPLACES the overlay-10 file. Overlay 11 adds inbound email routing (CoreInboundEmailRouting).
+ * Overlay 10 added outbound email (CoreEmailIntegration).
+ * Earlier: REPLACES the overlay-8 file. Overlay 9 adds the dashboard widget registry and the reporting pipeline.
+ * Earlier: REPLACES the overlay-7 file. Adds the Party directory and terminology bindings, plus (from overlay 6) the settings/notification registries, theme setting keys,
  * notification listeners and the Core workspace routes.
  */
 final class CorePlatformServiceProvider extends ServiceProvider
@@ -70,6 +80,8 @@ final class CorePlatformServiceProvider extends ServiceProvider
         $this->app->singleton(SettingRegistry::class);
         $this->app->singleton(NotificationTypeRegistry::class);
         $this->app->bind(NotificationEmailSender::class, PlatformMailerEmailSender::class);
+
+        $this->app->singleton(PermissionCatalogue::class);
 
         $this->app->singleton(TerminologyRegistry::class);
         $this->app->bind(TerminologyService::class);
@@ -98,6 +110,12 @@ final class CorePlatformServiceProvider extends ServiceProvider
         $this->app->bind(SmtpConnectionTester::class, SymfonySmtpConnectionTester::class);
         $this->app->singleton(MicrosoftGraphClient::class);
 
+        // Inbound email: modules claim record types; every intake adapter calls the one router.
+        $this->app->singleton(InboundRecordTypeRegistry::class);
+        $this->app->bind(InboundRecordTypeRegistrar::class, InboundRecordTypeRegistry::class);
+        $this->app->singleton(InboundEmailRouter::class);
+        $this->app->bind(ImapMailbox::class, WebklexImapMailbox::class);   // swap the entry point here; the router never changes
+
         $hooks = $this->app->make(ExtensionPointRegistry::class);
         $hooks->publish('CustomerProfileTabs', 'Tabs on the customer profile screen');
         $hooks->publish('DashboardWidgets', 'Widgets on the dashboard');
@@ -124,7 +142,7 @@ final class CorePlatformServiceProvider extends ServiceProvider
         $this->app->make(ReportingRegistry::class)->register(new CoreCustomersMetricSource());
 
         if ($this->app->runningInConsole()) {
-            $this->commands([RefreshSummariesCommand::class]);
+            $this->commands([RefreshSummariesCommand::class, PollInboundMailboxCommand::class, PruneInboundLogCommand::class]);
         }
 
         // Core's own generic entity names; other modules register theirs the same way.
@@ -156,11 +174,12 @@ final class CorePlatformServiceProvider extends ServiceProvider
         Event::listen(NotificationRequested::class, [HandleNotificationRequested::class, 'handle']);
         Event::listen(UsageThresholdReached::class, [NotifyAdminsOfUsageThreshold::class, 'handle']);
 
-        Gate::policy(Role::class, RolePolicy::class);
-
         // Any module toggle re-syncs Tenant Admin. Idempotent, so enabled/disabled needn't be inspected.
+        $this->app->make(PermissionCatalogue::class)->register('Core', CoreTenantSeeder::TENANT_ADMIN_PERMISSIONS);
         Event::listen(ModuleStateChanged::class, fn (ModuleStateChanged $e) => app(TenantAdminGrants::class)->sync($e->tenantId()));
 
+        Gate::policy(Role::class, RolePolicy::class);
+        
         Gate::before(function ($user, string $ability, array $arguments = []) {
             $subject = $arguments[0] ?? null;
             if ($subject instanceof Role && $subject->name === PermissionKey::SUPER_ADMIN_ROLE) {

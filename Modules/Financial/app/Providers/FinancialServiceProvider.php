@@ -4,9 +4,21 @@ namespace Modules\Financial\Providers;
 
 use Nwidart\Modules\Support\ModuleServiceProvider;
 use Illuminate\Console\Scheduling\Schedule;
+use Modules\Core\Permissions\PermissionCatalogue;
 
 class FinancialServiceProvider extends ModuleServiceProvider
 {
+    public function boot(): void
+    {
+        parent::boot();
+
+        $this->app->make(PermissionCatalogue::class)->register('Financial', [
+            'financial.invoices.create',
+            'financial.invoices.manage',
+            'financial.reports.view',
+        ]);
+    }
+    
     /**
      * The name of the module.
      */

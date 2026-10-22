@@ -7,6 +7,7 @@ namespace Modules\Core\Services;
 use App\Tenancy\TenantContext;
 use Illuminate\Support\Facades\DB;
 use Modules\Core\Permissions\PermissionManager;
+use Modules\Core\Permissions\TenantAdminGrants;
 
 /**
  * Seeds Core data for a NEW tenant (called by signup provisioning).
@@ -29,6 +30,7 @@ final class CoreTenantSeeder
     public function __construct(
         private readonly TenantContext $context,
         private readonly PermissionManager $permissions,
+        private readonly TenantAdminGrants $grants,
     ) {
     }
 
@@ -36,13 +38,8 @@ final class CoreTenantSeeder
     {
         DB::transaction(function () use ($tenantId) {
             $this->context->set($tenantId);
-
             $this->permissions->ensureSuperAdmin();
-
-            $this->permissions->upsertRole('Tenant Admin');
-            foreach (self::TENANT_ADMIN_PERMISSIONS as $key) {
-                $this->permissions->attach('Tenant Admin', $key);
-            }
+            $this->grants->sync($tenantId);
         });
     }
 }
