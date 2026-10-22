@@ -1,0 +1,1416 @@
+app SaaSPlatform
+  description "Multi-tenant SaaS modular business platform"
+  version "3.0.0"
+
+  rules
+    "Design every module other than Core so it can be enabled, disabled, or omitted independently of every other non-Core module; a dependency on Core is the only permitted module dependency, and a high-level module must never depend on another high-level module directly"
+    "Treat Core as the one mandatory module every tenant has enabled by default; it provides settings, theming, notifications, permissions, the organisation profile, outbound and inbound email, extension points, record metadata, module dependencies, terminology, dashboards, reporting, usage metering, and the shared customer directory as services that other modules consume only through events and DTOs, never through direct calls"
+    "Modules must never import or reference another module's classes directly; all cross-module data flows through events and typed DTOs"
+    "When one module's workflow should produce a side effect in another optional module, such as generating an invoice when a booking is confirmed, the source module dispatches a named event to Core's event bus rather than calling the other module directly; the target module reacts only if it is installed and enabled for that tenant, and the source module must keep working normally if no listener is present"
+    "Model a business entity shared by more than one module, such as customers or the tenant's own organisation profile, once in Core and reference it everywhere else by id; a module must never own its own duplicate copy of an entity another module also needs"
+    "Every cross-module payload must be a typed, immutable DTO class, never a raw array, generic object, or persistence model"
+    "Treat Core as an operating system and other modules as apps: Core exposes named extension points through CoreExtensionPoints that a module can register into; a module must never directly edit or reach into another module's UI or database schema"
+    "Give every module the ability to attach structured or semi-structured data to a Core record through CoreRecordExtensions rather than altering Core's schema, keeping Core's own tables clean and industry-agnostic"
+    "Declare a module's hard prerequisite modules explicitly in CoreModuleDependencyRegistry; never let a module assume another module is present without that dependency being declared and enforced by ModuleManager"
+    "Store every Core entity under its most generic, industry-neutral name internally, such as Party, Account, or Contact, and let CoreTerminology translate it into the vocabulary a tenant's business type expects, such as Customer, Patient, or Student, in the UI and on generated documents"
+    "Let each module register its own dashboard widgets with CoreDashboardRegistry and serve its own widget data from its own endpoint; the Core dashboard must never query another module's tables directly"
+    "Build cross-module reports through CoreReportingPipeline primarily via tenant-scoped, indexed, pre-aggregated summaries of each module's time-series data, since merging large multi-month datasets at the application layer scales poorly and risks memory exhaustion; reserve the application-layer merge for small result sets, and never build a cross-module report through a join across module-owned tables"
+    "Index every tenant-scoped table with a composite key that starts with tenant_id, such as (tenant_id, created_at) or (tenant_id, status), so queries narrow to the tenant before filtering further"
+    "Never hardcode a module's classification or category field as a rigid database enum when tenants or other modules may need to add, disable, or hide options; keep a small fixed enum only for a genuinely universal top-level classification, and put anything that must be modular, tenant-configured, or dependent on which modules are enabled into a relational, indexed lookup table instead"
+    "Scope every tenant-owned database table with a tenant_id column and apply an automatic application-level tenant filter to every query so queries are isolated per tenant"
+    "Never rely on the application-level tenant filter alone; it does not protect raw queries, direct table access, third-party package models, or a query that explicitly disables the filter. Enforce database-level row isolation on every tenant-owned table as the backstop, keyed on a per-request current-tenant identifier that TenantMiddleware sets on the database connection for every request, so the database itself refuses cross-tenant reads and writes regardless of application-layer bugs"
+    "Never allow a query, job, cache key, or file path to cross tenant boundaries without an explicit tenant_id check"
+    "Resolve the current tenant from the request hostname via a central TenantMiddleware before any tenant-scoped route executes, matching either the wildcard subdomain or a verified mapped custom domain"
+    "Scope every session cookie to the exact hostname the request arrived on, whether that is the tenant's platform subdomain or its verified custom_domain, and never to the shared parent domain, so session cookies and CSRF tokens establish correctly and are never sent to another tenant's hostname or to the control plane"
+    "Provision every new tenant on a wildcard subdomain of the form client-slug.pendagraphics.co.za by default, available instantly at signup with no DNS action required from the customer"
+    "Offer custom domain mapping (client-domain.co.za) on the Enterprise plan only, activated only after DNS ownership verification and never before"
+    "Gate module access by the tenant's active subscription plan rather than a cryptographically signed offline licence file"
+    "Define exactly three subscription plans, Starter, Professional, and Enterprise, each including the Core, Financial, and Support modules, so that plans differ only by usage limits and branding: Starter allows 2 workspace user seats, up to 50 support tickets per month, up to R50,000 (or USD 3,000) of payments processed per month, and a shared subdomain; Professional allows 10 workspace user seats, up to 500 support tickets per month, up to R500,000 (or USD 30,000) of payments processed per month, and a shared subdomain; Enterprise allows unlimited seats, tickets, and processed volume and is the only plan that may map a custom domain"
+    "Count only internal workspace users as user seats; customer portal users never consume a seat"
+    "Price every plan in two currencies, billing a tenant whose business is in South Africa in ZAR and every other tenant in USD: Starter costs R249 or USD 19 per month, Professional costs R699 or USD 49 per month, and Enterprise starts from R2,499 or USD 149 per month, with custom quotes above the starting price"
+    "Offer annual billing at a 20 percent discount charged upfront for the year, where the discounted monthly equivalent is 80 percent of the monthly price rounded down to a whole currency unit, for example Starter at R199 or USD 15 per month, and the annual charge is twelve times that equivalent"
+    "Measure plan limits per calendar month per tenant; the seat limit is a hard limit that rejects adding another active workspace user, while the processed-volume and support-ticket limits are soft limits that warn the tenant admin at 80 percent and at 100 percent of the allowance and prompt an upgrade; no limit may ever delete, hide, or reject data that a tenant's customers have already submitted"
+    "Define module-to-plan inclusion and per-tenant paid add-on entitlements as data rather than code, so that a future module can be bundled into selected plans or sold as an individually priced add-on to any plan without changing existing modules"
+    "Enforce signup uniqueness on the complete email address of a user and never on the email domain, so that several people from the same company or from a free email provider can each register their own tenant or account"
+    "Issue a TLS certificate only for a hostname that is an active tenant's platform subdomain or a verified custom domain, and never for an arbitrary or unverified hostname"
+    "Use a shared UI component library for all UI primitives; no module may reimplement a shared component, and every module's forms and ledgers must look and behave identically"
+    "Store third-party credentials, such as Paysharp, Paystack, Microsoft Graph, SMTP, PayStack, Stripe, and Chargebee secrets, encrypted per tenant, and never log raw card, account, or gateway secret details"
+    "Separate the control plane, which runs platform-wide tenant provisioning, the tenant directory, and the operator's own billing of tenants, from the data plane, which is the tenant-facing application made of the Core, Financial, and Support modules; the control plane must be served only from admin.pendagraphics.co.za and must never be reachable from a tenant's own subdomain or custom domain"
+    "Keep the operator's own billing of tenants for their subscription plan, run by the control plane's Billing Engine, entirely separate from the Financial module, which bills a tenant's own customers"
+    "Provide outbound email delivery as a Core service used by every module; default every tenant to the platform's own shared, pre-verified sending domain, and offer Microsoft 365 Admin Consent or a validated custom SMTP relay as tenant-owned delivery options on the Enterprise plan only"
+    "Never trust email threading headers such as In-Reply-To or References to match an inbound reply to its tenant-scoped record; they can be forged, stripped, or spoofed. Every outbound platform_shared email that expects a reply must embed a cryptographically signed token in its Reply-To sub-address, and CoreInboundEmailRouting must verify that signature before running any tenant lookup or matching logic against an inbound payload"
+    "Build each module's first release as an Enterprise-Ready MVP: implement only the MVP scope explicitly listed for that module, but shape its database tables, module boundaries, and DTOs so the deferred enterprise features can be added later without a breaking schema change or a violation of these architectural rules"
+    "For the Support module MVP, build only single web-form and email intake, relational dynamic categories, simple chronological ticket statuses, and core private notes with mentions; defer omnichannel chat and social intake, workload-based automated assignment, proactive SLA breach alerting, and automated knowledge-base deflection to a post-launch phase"
+
+feature TenantOnboarding
+  description "Self-service signup flow that instantly provisions a new tenant on a wildcard subdomain, replacing the offline installation wizard"
+  version "1.1.0"
+
+  params
+    company_name string
+    admin_name string
+    admin_email string
+    admin_password string
+    requested_subdomain string
+    business_type string
+    subscription_plan enum["starter", "professional", "enterprise"]
+    billing_cycle enum["monthly", "annual"]
+    country_code string
+
+  actions
+    "Validate company_name, admin_email, and admin_password meet minimum requirements"
+    "Check admin_email is not already registered as a user of any tenant on the platform, comparing the complete email address and never the email domain"
+      enforce "Many users and tenants may share an email domain, including a free provider such as gmail.com; only an exact email address match counts as a duplicate"
+    "Normalise requested_subdomain to lowercase alphanumeric and hyphens only, falling back to a slug derived from company_name if left blank"
+    "Create a new Tenant record with a unique subdomain of the form requested_subdomain.pendagraphics.co.za"
+      enforce "The subdomain must be unique across all tenants and must not collide with a reserved system subdomain such as www, api, admin, app, mail, reply, control, or status"
+    "Capture business_type so CoreTerminology can resolve industry-specific display labels for this tenant"
+    "Determine the tenant's billing currency as ZAR when country_code is ZA and USD otherwise, and record it on the tenant"
+    "Provision tenant-scoped default settings, including the default colour palette and an empty organisation profile"
+    "Register the new tenant in the control plane's TenantRegistry with active status"
+    "Seed Core module data scoped to the new tenant"
+    "Create the tenant admin user and assign the Tenant Admin role"
+    "Activate the selected subscription_plan with the chosen billing_cycle and billing currency through the PlatformBillingEngine, and enable the modules included in that plan"
+    "Send a welcome email with a link to the tenant's wildcard subdomain workspace"
+    "Issue a single-use, short-lived, cryptographically signed login handoff token for the new tenant admin and perform a full browser navigation, never a client-side in-app redirect, to the tenant's wildcard subdomain, where the token is redeemed to establish the admin's session on that hostname and land on the dashboard"
+      enforce "Crossing from the main platform site to a tenant's wildcard subdomain must use a full browser navigation so the browser cleanly re-establishes cookies and CSRF tokens across the domain boundary; a client-side in-app redirect must never be used to cross a hostname boundary"
+      enforce "A login handoff token must expire within one minute, be redeemable exactly once, and be valid only for the tenant and user it was issued to"
+      enforce "The workspace must be reachable on the wildcard subdomain immediately, with no manual DNS step required from the customer"
+
+feature SubscriptionManagement
+  description "Manages tenant subscription plans and gates module access accordingly, replacing RSA offline licence validation"
+  version "1.1.0"
+
+  params
+    tenant_id string
+    plan enum["starter", "professional", "enterprise"]
+    billing_cycle enum["monthly", "annual"]
+
+  actions
+    "Look up the tenant's current subscription record"
+    "Validate the requested plan change against the control plane's PlatformBillingEngine"
+    "Update the tenant's active plan and billing_cycle"
+    "Recompute the modules, user seats, monthly processed-volume allowance, monthly support-ticket allowance, and custom-domain entitlement allowed under the new plan"
+      enforce "A downgrade must not silently delete data belonging to a now-disabled module"
+      enforce "A downgrade must be rejected while the tenant's active workspace user count exceeds the target plan's seat limit, telling the tenant admin how many users to deactivate first"
+    "Disable module routes for modules no longer included in the plan while preserving their underlying data"
+    "When a downgrade removes the custom-domain entitlement, deactivate routing for the custom domain while preserving its record and keeping the platform subdomain working"
+    "Notify the tenant admin of the plan change by email and in-app notification"
+
+feature CustomDomainMapping
+  description "Maps a tenant's own domain over their default wildcard subdomain, available on the Enterprise plan only, after DNS verification"
+  version "1.1.0"
+
+  params
+    tenant_id string
+    custom_domain string
+
+  actions
+    "Verify the tenant's active subscription plan includes custom domain mapping"
+      enforce "Only Enterprise tenants may add a custom domain; Starter and Professional tenants must remain on their shared platform subdomain"
+    "Generate a unique DNS verification token and a CNAME target pointing to the wildcard subdomain infrastructure"
+    "Store the custom_domain against the tenant in a pending, unverified state"
+    "Instruct the tenant admin to create the CNAME record and a TXT record containing the verification token at their DNS provider"
+    "Poll the domain's DNS records until the CNAME and TXT verification token are found"
+      enforce "The domain must not be marked verified until both the CNAME and TXT token checks pass"
+    "Issue and install an SSL certificate for the verified custom_domain"
+      enforce "A certificate must never be issued for a custom domain that is unverified, pending, or not mapped to an active tenant"
+    "Mark the custom_domain as active and route requests for that hostname to the tenant's workspace"
+    "Update the tenant's routing information in the control plane's TenantRegistry"
+    "Keep the original wildcard subdomain reachable and pointed at the same tenant after mapping"
+
+feature ModuleManager
+  description "Tenant-admin UI for enabling and disabling modules permitted by the active subscription plan and by declared module prerequisites"
+  version "1.1.0"
+
+  params
+    tenant_id string
+    module_key enum["Core", "Financial", "Support"]
+    action_type enum["enable", "disable"]
+
+  actions
+    "Verify module_key is included in the tenant's active subscription plan or has been purchased by the tenant as an add-on"
+      enforce "A module that is neither included in the current plan nor purchased as an add-on cannot be enabled"
+      enforce "The Core module must always remain enabled for every tenant and can never be disabled through this feature"
+    "Look up module_key's declared prerequisites in CoreModuleDependencyRegistry"
+      enforce "A module cannot be enabled unless every module listed as its prerequisite is already enabled for the tenant"
+      enforce "A module cannot be disabled while another currently enabled module still declares it as a prerequisite"
+    "Toggle the module's enabled flag for this tenant only"
+    "Run the module's migrations and seeders scoped to this tenant if enabling for the first time"
+    "Deregister the module's CoreExtensionPoints hooks and CoreDashboardRegistry widgets if it was just disabled"
+    "Refresh the tenant's cached active-modules list used for route gating and sidebar navigation"
+
+feature AuthenticationAndAccess
+  description "Tenant-scoped authentication with two guards: internal workspace users and customer portal users"
+  version "1.0.0"
+
+  params
+    email string
+    password string
+    guard enum["workspace", "portal"]
+
+  actions
+    "Resolve the tenant from the request hostname, matching it against the wildcard subdomain pattern or a verified mapped custom domain, before attempting authentication"
+      enforce "An unverified or pending custom domain must never resolve to a tenant"
+    "Set the resolved tenant_id as the current-tenant identifier on the database connection for the lifetime of the request, so database-level row isolation enforces tenant isolation independently of the application-level tenant filter"
+      enforce "A request must never reach a tenant-scoped query without the current-tenant identifier having been set on that connection first"
+    "Authenticate the user against the resolved tenant's user pool only"
+      enforce "A user record belonging to a different tenant must never authenticate against this tenant's session"
+    "Regenerate the session ID on successful login to prevent session fixation"
+    "Load the user's roles and permissions scoped to the current tenant"
+    "Share auth.user, auth.permissions, and the tenant's active modules with the frontend as global shared state on every subsequent request"
+
+feature TenantRegistry
+  description "Control plane: the operator-facing directory of every tenant, recording metadata, active or suspended status, database routing, and a pointer to that tenant's CoreOrganisationProfile"
+  version "1.1.0"
+
+  params
+    tenant_id string
+    status enum["active", "suspended", "cancelled"]
+    database_connection string
+
+  actions
+    "Record the tenant's subdomain, mapped custom domain if any, and database_connection routing information, which points every tenant at the single shared platform database by default while allowing a tenant to be routed elsewhere later without a schema change"
+    "Reflect the tenant's current status as active, suspended, or cancelled"
+    "Suspend a tenant's data-plane access immediately when status changes to suspended, without deleting their data"
+      enforce "A suspended tenant's workspace and portal routes must return a clear suspended-account response rather than partial access"
+    "Expose the registry to the control plane's TenantMiddleware so tenant resolution and database routing stay in sync"
+
+feature PlatformBillingEngine
+  description "Control plane: the SaaS operator's own billing of tenants for their subscription plan, integrated with a payment processor such as Paystack"
+  version "1.1.0"
+
+  params
+    tenant_id string
+    processor enum["paystack", "stripe", "chargebee"]
+    plan string
+    billing_cycle enum["monthly", "annual"]
+    billing_currency enum["ZAR", "USD"]
+
+  actions
+    "Create or update the tenant's subscription record with the connected processor"
+    "Price the subscription from the plan catalogue using the tenant's billing_currency and billing_cycle, applying the annual discount when billing_cycle is annual and handling Enterprise as a starting price with custom quotes above it"
+    "Handle plan changes, renewals, and payment failures reported by the processor via webhook"
+      enforce "A processor webhook must be signature-verified before it can change any tenant's subscription state"
+    "Trigger SubscriptionManagement to recompute allowed modules, seats, and usage allowances when the processor confirms a plan change"
+    "Mark the tenant Past Due and notify the tenant admin after a failed renewal, before suspending access in TenantRegistry"
+    "Generate the operator's own invoice to the tenant for each billing cycle"
+
+feature PlatformSupportDesk
+  description "Control plane: internal support ticketing the SaaS operator's own staff use to resolve issues raised by tenant accounts, distinct from the tenant-facing Support module tenants use for their own customers"
+  version "1.0.0"
+
+  params
+    tenant_id string
+    subject string
+    priority enum["low", "medium", "high", "critical"]
+
+  actions
+    "Create an operator-side ticket linked to the reporting tenant_id"
+    "Allow operator staff to view the tenant's TenantRegistry status and PlatformBillingEngine subscription details alongside the ticket for context"
+    "Track the ticket through New, In Progress, Pending, and Resolved statuses"
+    "Notify the tenant admin by email when the ticket status changes"
+
+feature CoreSettings
+  description "Core module: manages tenant-scoped and module-scoped key-value application settings that every other module reads through a shared Settings facade"
+  version "1.0.0"
+
+  params
+    tenant_id string
+    scope string
+    setting_key string
+    setting_value string
+
+  actions
+    "Resolve the settings scope, either global to the tenant or namespaced to a specific module"
+    "Validate setting_key is registered for the resolved scope"
+    "Persist setting_value as a JSON-typed value under the resolved scope"
+    "Clear any cached settings for this tenant and scope"
+    "Broadcast a SettingsUpdated event carrying a typed SettingsUpdatedDTO so listening modules can react without direct coupling"
+
+feature CoreTheming
+  description "Core module: tenant-configurable colour palette applied instantly across the UI via CSS custom properties"
+  version "1.0.0"
+
+  params
+    tenant_id string
+    primary_colour string
+    secondary_colour string
+    accent_colour string
+
+  actions
+    "Validate each submitted colour value is a well-formed hex code"
+    "Check the WCAG AA contrast ratio between text and background tokens"
+      enforce "Any token pair below a 4.5:1 contrast ratio must surface a warning before saving"
+    "Persist the palette to tenant-scoped settings under the theme group via CoreSettings"
+    "Return the updated theme to the frontend and apply it directly to the root layout through a reactive binding rather than only writing CSS custom properties as a side effect"
+      enforce "The theme must be applied through the frontend's own reactivity on the root layout binding, not only through a shared-state side effect, to avoid a flash of unstyled content or stale colours when a tenant admin updates the palette or a user switches tabs quickly"
+
+feature CoreNotifications
+  description "Core module: in-app, toast, and email notifications dispatched in response to events raised by any module"
+  version "1.0.0"
+
+  params
+    user_id string
+    notification_type string
+
+  actions
+    "Resolve the notifying user's channel preferences for the given notification_type"
+    "Write the notification to the tenant-scoped notifications table"
+      enforce "A notification must never be written or delivered to a user outside the resolved tenant"
+    "Push an in-app toast if the user has an active session"
+    "Queue an email notification via CoreEmailIntegration if the user has enabled the email channel for this type"
+
+feature CorePermissions
+  description "Core module: tenant-scoped roles and permissions that every other module's policies enforce against"
+  version "1.0.0"
+
+  params
+    tenant_id string
+    role_name string
+    permission_key string
+
+  actions
+    "Validate permission_key follows the module.resource.action naming convention"
+    "Create or update the role scoped to the current tenant"
+    "Attach or detach the permission from the role"
+      enforce "A Super Admin role must always retain the wildcard permission and can never be edited or deleted"
+    "Refresh the cached permission set for every user assigned the role"
+
+feature CoreOrganisationProfile
+  description "Core module: the tenant's own organisation profile, used to brand every customer-facing document and screen across every other module"
+  version "1.0.0"
+
+  params
+    tenant_id string
+    organisation_name string
+    organisation_email string
+    organisation_phone string
+    organisation_address string
+    tax_registration_number string
+
+  actions
+    "Validate organisation_name and organisation_email"
+    "Persist the organisation profile scoped to the tenant"
+      enforce "Only one organisation profile may exist per tenant"
+    "Accept and store an uploaded logo file for use across the app and on generated documents"
+    "Broadcast an OrganisationProfileUpdated event so Financial, Support, and other modules refresh cached copies of the letterhead details"
+
+feature CoreCustomerManagement
+  description "Core module: the single shared Party/Contact directory, stored under Core's generic industry-neutral schema and displayed as Customer, Patient, Student, or similar via CoreTerminology, that Financial, Support, and any future module reference by customer_id so every module stays in sync on the same record"
+  version "1.0.0"
+
+  params
+    tenant_id string
+    customer_name string
+    email string
+    phone string
+    billing_address string
+    tax_number string
+
+  actions
+    "Validate customer_name and email"
+    "Check whether a customer with this email already exists for the current tenant"
+    "Create or update the customer record, including billing_address and tax_number, scoped to the current tenant"
+      enforce "A customer record must never be created without a tenant_id scope"
+      enforce "No other module may persist its own copy of customer name, email, phone, or address; it must store only the customer_id and read the rest from Core"
+    "Store the record under Core's generic Party/Contact schema regardless of the tenant's business_type; only the CoreTerminology display label changes"
+    "Dispatch a CustomerCreated or CustomerUpdated event carrying a typed CustomerDTO so listening modules can react without querying Core's tables directly"
+
+feature CoreEmailIntegration
+  description "Core module: configures how the tenant's outbound email is sent, from zero-setup shared delivery to the tenant's own Microsoft 365 or custom SMTP infrastructure on the Enterprise plan"
+  version "1.1.0"
+
+  params
+    tenant_id string
+    email_provider enum["platform_shared", "microsoft365", "custom_smtp"]
+    from_address string
+
+  actions
+    "Default every new tenant to platform_shared delivery through the platform's own verified sending domain, requiring zero setup"
+    "For microsoft365, let the tenant's IT administrator initiate a Microsoft Graph Admin Consent flow requesting application-level Mail.Send and Mail.Read permissions"
+      enforce "microsoft365 delivery must only be offered to tenants on the Enterprise plan"
+    "Store the resulting tenant-wide Microsoft Graph access token encrypted and scoped to this tenant only"
+    "For custom_smtp, accept a single relay credential set from the tenant's IT administrator and test the connection before saving"
+      enforce "A custom_smtp configuration must be successfully test-connected before it can be marked active"
+    "When sending any email on behalf of a workspace user, set the From header to that user's own address while authenticating through the tenant's configured provider"
+    "For any platform_shared email that expects a threaded reply, generate a cryptographically signed token binding the tenant_id and the originating record, and embed it in a Reply-To sub-address such as reply+ticket_abc123_signaturehash@reply.pendagraphics.co.za"
+      enforce "A signed Reply-To token must never be derived from guessable or sequential data; it must be a genuine cryptographic signature, in the style of signed URLs"
+    "Fall back to platform_shared delivery whenever a tenant's microsoft365 or custom_smtp configuration is not active"
+
+feature CoreInboundEmailRouting
+  description "Core module: routes inbound replies to tenant-generated emails back into the record that sent them, such as a Support ticket thread, independent of how the message arrives"
+  version "1.1.0"
+
+  params
+    tenant_id string
+    inbound_address string
+
+  actions
+    "Provision a unique inbound routing address under the platform's verified domain for every platform_shared tenant"
+    "Accept an inbound message from any intake entry point, such as a polled catch-all mailbox or a provider webhook, and normalise it into an InboundEmailDTO that carries the original recipient address before any other processing"
+      enforce "Every step after normalisation must behave identically regardless of which entry point delivered the message, so replacing or adding an entry point never changes the routing logic"
+    "Verify the message originates from a recognised source appropriate to its entry point, such as the platform's own authenticated mailbox connection or a provider's webhook signature"
+    "Process each inbound message at most once, identified by its Message-ID, so a re-polled mailbox or a retried webhook delivery never attaches a duplicate"
+    "Extract and verify the cryptographic signature embedded in the recipient sub-address before attempting any tenant lookup or matching logic"
+      enforce "An inbound email with a missing or invalid signature must be rejected outright and must never be matched by parsing the forgeable In-Reply-To or References headers alone"
+    "Resolve the tenant_id and originating record directly from the verified signature payload, not from message headers"
+      enforce "An inbound email that cannot be matched to a tenant-scoped record via a verified signature must never be attached to the wrong tenant's data"
+    "Dispatch an InboundEmailReceived event carrying the verified InboundEmailDTO so the owning module, such as Support, can append it to the correct thread"
+
+feature CoreExtensionPoints
+  description "Core module: the plugin-style hook registry that lets an installed module extend a Core UI screen, such as adding a tab to the customer profile, without ever modifying Core's own code"
+  version "1.0.0"
+
+  params
+    tenant_id string
+    hook_name string
+    module_key string
+    component_reference string
+    order_index integer
+
+  actions
+    "Publish each hook_name a Core screen exposes, such as CustomerProfileTabs or DashboardWidgets, at Core boot time"
+    "Let an installed module register a component_reference against an existing hook_name"
+      enforce "A module may only register into a hook_name that Core has explicitly published; it can never inject into an arbitrary point in another module's UI"
+    "Render every component registered for a hook_name in order_index sequence at runtime"
+    "Deregister a module's hook registrations automatically when that module is disabled for the tenant"
+
+feature CoreRecordExtensions
+  description "Core module: lets any installed module attach its own structured or semi-structured metadata to a Core record, such as a customer, without altering Core's schema"
+  version "1.0.0"
+
+  params
+    tenant_id string
+    core_entity string
+    core_entity_id string
+    module_key string
+    metadata string
+
+  actions
+    "Validate core_entity refers to a table Core has explicitly opened for extension, such as customers or invoices"
+    "Store metadata as a JSON blob namespaced under module_key against the given core_entity_id"
+      enforce "A module must only read or write the metadata namespace registered to its own module_key, never another module's namespace"
+    "Return the merged core record plus every installed module's metadata namespace when the record is requested"
+
+feature CoreModuleDependencyRegistry
+  description "Core module: the explicit registry of hard prerequisite modules a given module requires before it can be enabled, preventing a chaotic web of implicit dependencies"
+  version "1.0.0"
+
+  params
+    module_key enum["Core", "Financial", "Support"]
+    requires array[string]
+
+  actions
+    "Declare each module's hard prerequisites, for example a module requiring only Core, or requiring Core plus one specific named module"
+      enforce "Only Core may appear with an empty requires list; every other module must declare at least Core as a prerequisite"
+    "Expose the declared requires list to ModuleManager so it can validate an enable or disable action before applying it"
+    "Reject a declared dependency that would create a circular requirement between two modules"
+
+feature CoreTerminology
+  description "Core module: translates Core's generic internal entity names, such as Party or Contact, into the industry-specific language a tenant's business type expects, such as Customer, Patient, or Student"
+  version "1.0.0"
+
+  params
+    tenant_id string
+    business_type string
+    generic_term string
+    display_term string
+
+  actions
+    "Store every Core entity under its most generic, universal name internally, such as Party, Account, or Contact"
+    "Resolve a display_term for each generic_term based on the tenant's business_type, falling back to the generic_term when no mapping is defined"
+    "Apply the resolved display_term across every module's UI labels and generated documents"
+      enforce "Renaming a generic_term for display must never rename or migrate the underlying Core table or column"
+
+feature CoreDashboardRegistry
+  description "Core module: the widget registration system that lets each installed module contribute dashboard widgets to an otherwise empty Core dashboard grid, without Core hardcoding any chart or metric"
+  version "1.0.0"
+
+  params
+    tenant_id string
+    module_key string
+    widget_id string
+    widget_title string
+    data_endpoint string
+    grid_x integer
+    grid_y integer
+    grid_width integer
+    grid_height integer
+
+  actions
+    "Let an installed module register a widget_id, widget_title, and default grid position when it activates for a tenant"
+    "Store the widget's data_endpoint, which must belong to the registering module, not Core"
+      enforce "The Core Dashboard must never query another module's database tables directly; every widget fetches its own data from its own data_endpoint"
+    "Assemble the tenant's dashboard by rendering every enabled module's registered widgets inside an empty grid container"
+    "Deregister a module's widgets automatically when that module is disabled for the tenant"
+
+feature CoreReportingPipeline
+  description "Core module: a standard time-series data pipeline that lets modules such as Financial and Support contribute data to a cross-module report without knowing about each other"
+  version "1.0.0"
+
+  params
+    tenant_id string
+    module_key string
+    metric_key string
+    date_from string
+    date_to string
+
+  actions
+    "Define a standard time-series schema of date, label, and value that every module maps its own metrics onto when asked"
+    "Maintain a tenant-scoped, indexed summary per module that pre-aggregates its metrics onto the standard schema, refreshed on a schedule appropriate to that metric"
+    "Query each active module's pre-aggregated view independently, filtered by tenant_id and the requested date range, rather than its live operational tables"
+      enforce "A cross-module report spanning a large date range must read from each module's pre-aggregated summary; an application-layer merge of independently fetched datasets is reserved for small result sets only, and a join across module-owned tables is never permitted"
+    "Merge the returned per-module series chronologically into a single overlay-ready series for the front end"
+    "Omit a module's series entirely, without erroring, if that module is not enabled for the tenant"
+
+feature CoreUsageMetering
+  description "Core module: measures each tenant's monthly usage of user seats, payments processed, and support tickets against the active plan's limits, receiving usage from other modules only through events and DTOs"
+  version "1.0.0"
+
+  params
+    tenant_id string
+    metric enum["user_seats", "financial_volume", "support_tickets"]
+    amount double
+
+  actions
+    "Receive a UsageRecorded event carrying an immutable UsageRecordedDTO from the module that owns the metric, without Core calling that module"
+    "Add the amount to the tenant's counter for the current calendar month, creating the counter when it does not exist"
+    "Measure financial_volume in the tenant's billing currency"
+    "Count user_seats as the tenant's active workspace users, excluding customer portal users"
+    "Compare the counter to the limit allowed by the tenant's active plan, treating Enterprise as unlimited"
+    "Reject adding another active workspace user when it would exceed the plan's seat limit and prompt the tenant admin to upgrade"
+      enforce "The seat limit is a hard limit; the processed-volume and support-ticket limits must never reject or delete a payment or a ticket"
+    "Notify the tenant admin through CoreNotifications when a counter reaches 80 percent and again at 100 percent of its allowance"
+    "Show current usage against each limit on the tenant admin's subscription screen"
+    "Reset monthly counters at the start of each calendar month while keeping earlier months for reporting"
+
+feature FinancialTaxConfiguration
+  description "Financial module: tenant-configurable tax rates applied to quotations and invoices"
+  version "1.0.0"
+
+  params
+    tenant_id string
+    tax_name string
+    tax_rate double
+    is_compound boolean
+    is_default boolean
+
+  actions
+    "Validate tax_name is not empty and tax_rate is a non-negative percentage"
+    "Create or update the tax rate scoped to the current tenant"
+      enforce "Only one tax rate per tenant may be marked as default at a time"
+    "Recalculate compound tax ordering when more than one compound tax rate is active"
+
+feature FinancialPaymentGatewayConfiguration
+  description "Financial module: lets a tenant admin enable Paysharp and Paystack and store the API credentials used to accept invoice payments"
+  version "1.0.0"
+
+  params
+    tenant_id string
+    gateway enum["paysharp", "paystack"]
+    api_key string
+    api_secret string
+    is_enabled boolean
+
+  actions
+    "Verify the authenticated user has financial.settings.manage permission for this tenant"
+    "Validate the submitted api_key and api_secret against the gateway's test endpoint before saving"
+      enforce "Credentials must be validated with the gateway before is_enabled can be set to true"
+    "Encrypt and persist the credentials scoped to the current tenant"
+    "Allow more than one gateway to be enabled simultaneously so FinancialPaymentProcessing can offer a choice at checkout"
+    "Never expose a stored api_key or api_secret back to the frontend after saving; return only a masked reference"
+
+feature FinancialQuotations
+  description "Financial module: quotation lifecycle from draft through to conversion into an invoice"
+  version "1.0.0"
+
+  params
+    customer_id string
+    currency string
+    valid_until string
+
+  actions
+    "Look up the customer via CoreCustomerManagement and confirm customer_id belongs to the current tenant"
+    "Create a draft quotation with line items scoped to the current tenant and customer_id"
+    "Calculate line item totals, tax, and grand total using the tenant's FinancialTaxConfiguration rates"
+    "Transition the quotation through Draft, Sent, Accepted, and Declined in order"
+      enforce "A quotation must not be marked Accepted after its valid_until date has passed"
+    "Convert an Accepted quotation into a new Draft invoice, carrying forward the line items, tax, and customer_id"
+      enforce "Converting a quotation must never duplicate the customer's contact details onto the invoice; only customer_id is carried forward"
+    "Dispatch QuotationAccepted and QuotationConverted events"
+
+feature FinancialInvoicing
+  description "Financial module: invoice lifecycle, tax calculation, and branded PDF generation, fully tenant-scoped"
+  version "1.0.0"
+
+  params
+    customer_id string
+    currency string
+    due_date string
+
+  actions
+    "Look up the customer via CoreCustomerManagement and confirm customer_id belongs to the current tenant"
+      enforce "The Financial module must reference the customer by customer_id only and must never store its own copy of customer contact details"
+    "Load the tenant's tax rates via FinancialTaxConfiguration and default currency via CoreSettings"
+    "Create or accept a converted-from-quotation invoice in Draft status with calculated totals"
+    "Transition the invoice through Draft, Approved, Sent, Part-Paid, Paid, Overdue, and Cancelled in order"
+      enforce "An invoice must not move to Paid unless its recorded paid_total meets or exceeds its total"
+    "Generate a branded PDF using CoreOrganisationProfile letterhead details, the customer's details from CoreCustomerManagement, and the CoreTheming colour palette"
+    "Send the invoice by email through CoreEmailIntegration"
+    "Register the Invoicing dashboard widget and reporting metrics with CoreDashboardRegistry and CoreReportingPipeline"
+    "Dispatch InvoiceCreated, InvoiceApproved, and InvoiceSent events for CoreNotifications to act on"
+
+feature FinancialPaymentProcessing
+  description "Financial module: records invoice payments taken through a tenant's configured Paysharp or Paystack gateway, or via manual EFT with an uploaded proof of payment"
+  version "1.1.0"
+
+  params
+    invoice_id string
+    amount double
+    payment_method enum["paysharp", "paystack", "eft"]
+    reference string
+
+  actions
+    "Verify invoice_id belongs to the current tenant and is not already fully paid"
+    "For paysharp or paystack, confirm a FinancialPaymentGatewayConfiguration is enabled for that gateway, then initiate a hosted payment session and redirect the customer to complete payment"
+      enforce "A gateway payment must never be initiated using a gateway the tenant has not enabled and validated"
+    "For eft, accept an uploaded proof_of_payment file and record the payment in a Pending Verification state"
+      enforce "An EFT payment must remain Pending Verification until a staff member with financial.payments.verify permission approves it"
+    "On gateway webhook confirmation, verify the payload signature before matching the transaction to its originating invoice"
+      enforce "A payment webhook must be signature-verified before any invoice balance is updated"
+    "Record the confirmed or verified payment against the invoice and update its paid_total"
+      enforce "paid_total must never exceed the invoice's total"
+    "Mark the invoice Paid once paid_total meets or exceeds total, or Part-Paid otherwise"
+    "Dispatch an InvoicePaid or PaymentRecorded event for CoreNotifications to act on"
+    "Dispatch a UsageRecorded event carrying an immutable UsageRecordedDTO with the recorded payment amount in the tenant's billing currency to the Core event bus so CoreUsageMetering can count processed volume"
+
+feature SupportCategoryManagement
+  description "Support module MVP: manages the Tier 2 subcategory lookup table beneath each fixed Tier 1 parent_category, so categories can be added, renamed, or soft-disabled without touching a hardcoded enum, and are automatically hidden when tied to a module the tenant has not enabled"
+  version "1.0.0"
+
+  params
+    tenant_id string
+    parent_category enum["account_access", "billing_subscription", "crm_modules", "erp_modules", "integrations_data", "reporting_analytics", "performance_stability", "feature_request", "general_inquiry"]
+    slug string
+    display_name string
+    is_active boolean
+
+  actions
+    "Validate slug is snake_case and unique within its parent_category"
+    "Create or update the subcategory record with its parent_category, slug, and display_name"
+    "Soft-disable a subcategory by setting is_active to false rather than deleting it, preserving historical tickets that reference it"
+    "Hide a subcategory whose parent_category maps to a module the tenant has not enabled, such as billing_subscription mapping to Financial, by checking the tenant's active-modules list from ModuleManager"
+      enforce "A tenant must never be offered a subcategory tied to a module they have not enabled"
+    "Index subcategories by parent_category for fast cascading dropdown queries"
+
+feature SupportTicketManagement
+  description "Support module MVP: captures customer support requests via web form or email intake, classifies them by Tier 1 and Tier 2 category and impact, and tracks a simple chronological status through resolution; the schema is shaped to grow into full enterprise triage without breaking module boundaries"
+  version "1.1.0"
+
+  params
+    customer_id string
+    channel enum["web_form", "email"]
+    parent_category enum["account_access", "billing_subscription", "crm_modules", "erp_modules", "integrations_data", "reporting_analytics", "performance_stability", "feature_request", "general_inquiry"]
+    subcategory_slug string
+    impact enum["single_user", "department", "organisation"]
+    subject string
+
+  actions
+    "Identify the requesting user_id and tenant_id from the authenticated session before accepting the request"
+    "Look up the requester via CoreCustomerManagement, or create a new customer record there if the requester is unknown, and confirm customer_id belongs to the current tenant"
+      enforce "Support must reference the requester by customer_id only and must never store its own duplicate copy of their contact details"
+    "Validate subcategory_slug is an active SupportCategoryManagement entry under the given parent_category"
+    "Assign the ticket a unique reference and set its status to Open"
+    "Attach diagnostic metadata, such as browser logs, system version, or environment variables, through CoreRecordExtensions instead of a Support-owned column on the customer record"
+    "Track the ticket status in strict chronological order: Open, In Progress, Pending Engineering, Pending Customer, Resolved, and Closed"
+      enforce "A ticket must only move forward through its defined statuses, or back to In Progress from Pending Customer or Pending Engineering; it must never skip backward past Resolved"
+    "Register the Support dashboard widget and reporting metrics with CoreDashboardRegistry and CoreReportingPipeline"
+    "Dispatch a TicketCreated event carrying an immutable TicketCreatedDTO to the Core event bus so CoreNotifications can send the confirmation email"
+    "Dispatch a UsageRecorded event carrying an immutable UsageRecordedDTO for each created ticket to the Core event bus so CoreUsageMetering can count monthly tickets"
+
+feature SupportRoutingAndSla
+  description "Support module MVP: computes ticket priority from the tenant's subscription tier and selected impact, routes the ticket to its category's owning queue by parent_category, and stamps SLA response and resolution deadlines; workload-based assignment and proactive breach alerting are deferred post-launch, though the schema reserves the fields they will need"
+  version "1.0.0"
+
+  params
+    ticket_id string
+    subscription_plan enum["starter", "professional", "enterprise"]
+    impact enum["single_user", "department", "organisation"]
+    parent_category enum["account_access", "billing_subscription", "crm_modules", "erp_modules", "integrations_data", "reporting_analytics", "performance_stability", "feature_request", "general_inquiry"]
+
+  actions
+    "Evaluate the priority matrix by cross-referencing the tenant's subscription_plan against the selected impact, for example an Enterprise tenant reporting an entire department blocked resolves to Critical priority"
+    "Stamp sla_response_due_at and sla_resolution_due_at on the ticket based on the resolved priority"
+    "Route the ticket to its owning queue based on parent_category alone for the MVP, for example crm_modules to the Sales Tech Specialist queue, erp_modules to the Financial Modules Support queue, and billing_subscription directly to the Finance and Billing queue, bypassing technical support"
+      enforce "MVP routing selects a queue by parent_category only; workload-based agent assignment across a team is deferred post-launch"
+    "Pause the sla_resolution_due_at timer while the ticket is in Pending Customer status and resume it when the status returns to In Progress"
+    "Reserve, but do not yet actively alert on, an SLA breach threshold field so proactive breach notifications can be enabled post-launch without a schema change"
+
+feature SupportEngineeringEscalation
+  description "Support module MVP: lets an agent escalate a ticket identified as a genuine defect to the engineering team's issue tracker, keeping the ticket linked to the resulting bug card"
+  version "1.0.0"
+
+  params
+    ticket_id string
+    agent_id string
+    escalation_notes string
+
+  actions
+    "Verify the escalating agent has support.tickets.escalate permission for this tenant"
+    "Transition the ticket to Pending Engineering status"
+    "Create a linked bug card in the engineering team's issue tracker, such as GitHub Issues, via its API and store the returned reference on the ticket"
+      enforce "A ticket must not be marked Pending Engineering unless a linked bug card reference is successfully stored"
+    "Notify the requesting customer that their issue has been escalated for engineering review"
+
+feature SupportResolutionAndClosure
+  description "Support module MVP: resolves a ticket with a root cause code, holds it in a soft-resolved verification window, and closes or reopens it based on customer response, finishing with a CSAT survey"
+  version "1.0.0"
+
+  params
+    ticket_id string
+    root_cause_code enum["user_error", "software_bug", "data_corruption", "configuration_issue", "third_party_outage"]
+    verification_window_days integer
+
+  actions
+    "Verify the ticket's status is In Progress or Pending Engineering before it can be resolved"
+    "Transition the ticket to Resolved and record the selected root_cause_code for reporting"
+    "Notify the customer that their ticket is resolved and start the verification_window_days grace period"
+    "Reopen the ticket to In Progress immediately if the customer replies within the verification window indicating the issue persists"
+      enforce "A customer reply during the verification window must reopen the ticket before the window can close it"
+    "Automatically transition the ticket to Closed once the verification window elapses with no customer reply"
+    "Dispatch a CSAT survey request through CoreNotifications once the ticket reaches Closed"
+
+feature SupportKnowledgeBase
+  description "Support module MVP: a simple CRUD system for internal and customer-facing articles and FAQs; automated ticket-deflection suggestions are deferred post-launch"
+  version "1.0.0"
+
+  params
+    title string
+    body string
+    is_customer_facing boolean
+
+  actions
+    "Create, update, or archive the article scoped to the current tenant"
+    "Publish the article to the portal guard's help centre when is_customer_facing is true, or keep it staff-only otherwise"
+
+feature SupportCollaboration
+  description "Support module MVP: private internal notes and teammate mentions on a ticket, never visible to the requesting customer"
+  version "1.0.0"
+
+  params
+    ticket_id string
+    author_id string
+    note string
+    mentioned_user_ids array[string]
+
+  actions
+    "Attach the note to the ticket's internal thread"
+      enforce "An internal note must never be exposed on the customer-facing portal view of the ticket"
+    "Notify each mentioned user via CoreNotifications"
+
+feature SupportReporting
+  description "Support module: performance metrics across ticket volume, response and resolution times, agent workload, root cause patterns, and customer satisfaction"
+  version "1.0.0"
+
+  params
+    date_from string
+    date_to string
+
+  actions
+    "Aggregate ticket volume, average first-response time, and average resolution time for the given date range"
+    "Compute per-agent workload and SLA breach counts"
+    "Aggregate ticket counts by root_cause_code to surface recurring defect patterns for the business"
+    "Compute the average customer satisfaction rating from post-resolution CSAT surveys"
+    "Map the aggregated metrics onto CoreReportingPipeline's standard date, label, and value schema when a cross-module report requests them"
+
+endpoint CreateTenant "/api/tenants"
+  description "Provisions a new tenant workspace on a wildcard subdomain during signup"
+  version "1.0.0"
+  method "POST"
+
+  params
+    company_name string
+    admin_name string
+    admin_email string
+    admin_password string
+    requested_subdomain string
+    business_type string
+    subscription_plan enum["starter", "professional", "enterprise"]
+    billing_cycle enum["monthly", "annual"]
+    country_code string
+
+  responses
+    TenantCreatedPayload
+      tenant_id string
+      subdomain string
+      workspace_url string
+      handoff_url string
+      billing_currency string
+      subscription_plan string
+
+  actions
+    "Validate all required signup fields"
+    "Reject the request when the subdomain is taken or reserved, or when admin_email is already registered as a complete email address, never comparing the email domain"
+    "Create the tenant, admin user, and default settings on the requested wildcard subdomain"
+    "Activate the selected subscription plan with the chosen billing cycle and the billing currency derived from country_code"
+    "Issue a single-use login handoff URL on the tenant's subdomain for the new admin"
+
+  returns
+    201 TenantCreatedPayload
+    422 "Validation failed"
+    409 "A tenant with this subdomain or email address already exists"
+
+endpoint MapCustomDomain "/tenants/{tenant_id}/domain"
+  description "Registers and verifies a custom domain to map over the tenant's wildcard subdomain"
+  version "1.0.0"
+  method "POST"
+
+  params
+    tenant_id string
+    custom_domain string
+
+  responses
+    DomainMappingPayload
+      custom_domain string
+      verification_status string
+      cname_target string
+      verification_token string
+
+  actions
+    "Verify the tenant's subscription plan permits custom domain mapping"
+    "Generate the CNAME target and TXT verification token"
+    "Store the domain in a pending verification state"
+
+  returns
+    202 DomainMappingPayload
+    403 "Custom domain mapping is available on the Enterprise plan only"
+    409 "This domain is already mapped to another tenant"
+    422 "Validation failed"
+
+endpoint SuspendTenant "/control-plane/tenants/{tenant_id}/suspend"
+  description "Control plane: suspends a tenant's data-plane access without deleting their data"
+  version "1.0.0"
+  method "POST"
+
+  params
+    tenant_id string
+    reason string
+
+  responses
+    TenantSuspendedPayload
+      tenant_id string
+      status string
+
+  actions
+    "Verify the authenticated user is an operator staff member with control_plane.tenants.suspend permission"
+    "Update the tenant's status to suspended in TenantRegistry"
+    "Notify the tenant admin that their workspace has been suspended"
+
+  returns
+    200 TenantSuspendedPayload
+    403 "Missing permission to suspend tenants"
+    404 "Tenant not found"
+
+endpoint PlatformBillingWebhook "/api/control-plane/billing/webhook"
+  description "Control plane: receives subscription and payment events from the connected billing processor"
+  version "1.0.0"
+  method "POST"
+
+  params
+    processor enum["paystack", "stripe", "chargebee"]
+    payload string
+    signature string
+
+  responses
+    BillingWebhookProcessedPayload
+      tenant_id string
+      subscription_status string
+
+  actions
+    "Verify the signature against the processor's stored webhook secret"
+      enforce "A billing webhook with an invalid or missing signature must be rejected before any subscription state changes"
+    "Match the payload to its originating tenant"
+    "Update the tenant's subscription status and trigger SubscriptionManagement to recompute access"
+
+  returns
+    200 BillingWebhookProcessedPayload
+    400 "Invalid webhook signature"
+    404 "No matching tenant found for this billing event"
+
+endpoint UpdateTheme "/core/theme"
+  description "Persists the tenant's colour palette and returns it for immediate application"
+  version "1.0.0"
+  method "POST"
+
+  params
+    primary_colour string
+    secondary_colour string
+    accent_colour string
+
+  responses
+    ThemeUpdatedPayload
+      primary_colour string
+      secondary_colour string
+      accent_colour string
+
+  actions
+    "Verify the authenticated user has core.settings.manage permission for this tenant"
+    "Validate colour values and contrast ratios"
+    "Persist the palette via CoreSettings"
+
+  returns
+    200 ThemeUpdatedPayload
+    403 "Missing permission to manage settings"
+    422 "Validation failed"
+
+endpoint ListNotifications "/core/notifications"
+  description "Returns the current user's recent notifications and unread count"
+  version "1.0.0"
+  method "GET"
+
+  responses
+    NotificationListPayload
+      unread_count integer
+
+  actions
+    "Load the authenticated user's most recent notifications scoped to the current tenant"
+    "Compute the unread_count"
+
+  returns
+    200 NotificationListPayload
+
+endpoint UpdateOrganisationProfile "/core/organisation"
+  description "Creates or updates the tenant's own organisation profile used on branded documents"
+  version "1.0.0"
+  method "POST"
+
+  params
+    organisation_name string
+    organisation_email string
+    organisation_phone string
+    organisation_address string
+    tax_registration_number string
+
+  responses
+    OrganisationProfilePayload
+      organisation_name string
+      organisation_email string
+      organisation_address string
+
+  actions
+    "Verify the authenticated user has core.settings.manage permission for this tenant"
+    "Validate organisation_name and organisation_email"
+    "Persist the organisation profile scoped to the tenant"
+
+  returns
+    200 OrganisationProfilePayload
+    403 "Missing permission to manage the organisation profile"
+    422 "Validation failed"
+
+endpoint ConfigureEmailIntegration "/core/email-integration"
+  description "Configures how the tenant's outbound and inbound email is handled"
+  version "1.0.0"
+  method "POST"
+
+  params
+    email_provider enum["platform_shared", "microsoft365", "custom_smtp"]
+    from_address string
+
+  responses
+    EmailIntegrationPayload
+      email_provider string
+      from_address string
+      status string
+
+  actions
+    "Verify the authenticated user has core.settings.manage permission for this tenant"
+    "Validate email_provider is permitted under the tenant's subscription plan"
+    "Initiate the Microsoft 365 Admin Consent flow or test the custom SMTP connection as applicable"
+    "Persist the configuration scoped to the current tenant"
+
+  returns
+    200 EmailIntegrationPayload
+    403 "Missing permission or plan is not Enterprise"
+    422 "Validation failed"
+
+endpoint StoreCustomer "/core/customers"
+  description "Creates or updates a customer in the tenant's shared customer directory"
+  version "1.0.0"
+  method "POST"
+
+  params
+    customer_name string
+    email string
+    phone string
+    billing_address string
+    tax_number string
+
+  responses
+    CustomerPayload
+      customer_id integer
+      customer_name string
+      email string
+
+  actions
+    "Verify the authenticated user has core.customers.manage permission for this tenant"
+    "Validate customer_name and email"
+    "Create or update the customer record scoped to the current tenant"
+    "Dispatch a CustomerCreated or CustomerUpdated event"
+
+  returns
+    201 CustomerPayload
+    403 "Missing permission to manage customers"
+    422 "Validation failed"
+
+endpoint UpdateRecordMetadata "/core/records/{core_entity}/{core_entity_id}/metadata"
+  description "Lets an installed module read or write its own metadata namespace on a Core record without altering Core's schema"
+  version "1.0.0"
+  method "POST"
+
+  params
+    core_entity string
+    core_entity_id string
+    module_key string
+    metadata string
+
+  responses
+    RecordMetadataPayload
+      core_entity string
+      core_entity_id string
+      module_key string
+
+  actions
+    "Verify the requesting module_key matches the module making the request"
+      enforce "A module may only write to its own metadata namespace on the record"
+    "Validate core_entity is open for extension"
+    "Persist the metadata JSON blob under the module's namespace against core_entity_id"
+
+  returns
+    200 RecordMetadataPayload
+    403 "This module may not write to another module's metadata namespace"
+    404 "Core record not found"
+
+endpoint ListDashboardWidgets "/core/dashboard"
+  description "Returns the current tenant's assembled dashboard grid from every enabled module's registered widgets"
+  version "1.0.0"
+  method "GET"
+
+  responses
+    DashboardPayload
+      widget_count integer
+
+  actions
+    "Load every widget registered by an enabled module via CoreDashboardRegistry for the current tenant"
+    "Return each widget's id, title, data_endpoint, and grid position without fetching its data"
+
+  returns
+    200 DashboardPayload
+
+endpoint GetCrossModuleReport "/core/reports"
+  description "Returns a merged, chronologically overlaid time-series report across every enabled module that contributes the requested metric"
+  version "1.0.0"
+  method "GET"
+
+  params
+    metric_key string
+    date_from string
+    date_to string
+
+  responses
+    ReportPayload
+      metric_key string
+      series_count integer
+
+  actions
+    "Determine which enabled modules contribute data for metric_key"
+    "Query each contributing module's own reporting endpoint independently via CoreReportingPipeline"
+    "Merge the returned series chronologically into a single payload"
+
+  returns
+    200 ReportPayload
+    422 "No enabled module contributes the requested metric_key"
+
+endpoint ConfigurePaymentGateway "/financial/payment-gateways"
+  description "Enables a payment gateway and stores its API credentials for the current tenant"
+  version "1.0.0"
+  method "POST"
+
+  params
+    gateway enum["paysharp", "paystack"]
+    api_key string
+    api_secret string
+
+  responses
+    GatewayConfiguredPayload
+      gateway string
+      is_enabled boolean
+
+  actions
+    "Verify the authenticated user has financial.settings.manage permission for this tenant"
+    "Validate the credentials against the gateway's test endpoint"
+    "Encrypt and persist the credentials scoped to the current tenant"
+
+  returns
+    200 GatewayConfiguredPayload
+    403 "Missing permission to manage payment gateways"
+    422 "The supplied credentials could not be validated with the gateway"
+
+endpoint StoreQuotation "/financial/quotations"
+  description "Creates a new quotation for the current tenant"
+  version "1.0.0"
+  method "POST"
+
+  params
+    customer_id string
+    currency string
+    valid_until string
+
+  responses
+    QuotationCreatedPayload
+      quotation_id integer
+      reference string
+      total double
+      status string
+
+  actions
+    "Verify the authenticated user has financial.quotations.create permission for this tenant"
+    "Validate customer_id exists in Core's shared customer directory and belongs to the current tenant"
+    "Create the quotation in Draft status with calculated totals"
+
+  returns
+    201 QuotationCreatedPayload
+    403 "Missing permission to create quotations"
+    422 "Validation failed"
+
+endpoint ConvertQuotation "/financial/quotations/{quotation_id}/convert"
+  description "Converts an accepted quotation into a draft invoice"
+  version "1.0.0"
+  method "POST"
+
+  params
+    quotation_id string
+
+  responses
+    InvoiceCreatedPayload
+      invoice_id integer
+      reference string
+      total double
+      currency string
+
+  actions
+    "Verify the quotation belongs to the current tenant and is in Accepted status"
+      enforce "Only a quotation in Accepted status may be converted to an invoice"
+    "Create a new Draft invoice carrying forward the quotation's line items, tax, and customer_id"
+
+  returns
+    201 InvoiceCreatedPayload
+    403 "Missing permission to convert quotations"
+    409 "Only an accepted quotation can be converted to an invoice"
+    422 "Validation failed"
+
+endpoint StoreInvoice "/financial/invoices"
+  description "Creates a new invoice for the current tenant"
+  version "1.0.0"
+  method "POST"
+
+  params
+    customer_id string
+    currency string
+    due_date string
+
+  responses
+    InvoiceCreatedPayload
+      invoice_id integer
+      reference string
+      total double
+      currency string
+
+  actions
+    "Verify the authenticated user has financial.invoices.create permission for this tenant"
+    "Validate customer_id exists in Core's shared customer directory and belongs to the current tenant"
+    "Create the invoice in Draft status with calculated totals"
+
+  returns
+    201 InvoiceCreatedPayload
+    403 "Missing permission to create invoices"
+    422 "Validation failed"
+
+endpoint InitiateInvoicePayment "/financial/invoices/{invoice_id}/pay"
+  description "Starts a payment against an invoice via a tenant's configured Paysharp or Paystack gateway, or manual EFT with a proof of payment upload"
+  version "1.0.0"
+  method "POST"
+
+  params
+    invoice_id string
+    amount double
+    payment_method enum["paysharp", "paystack", "eft"]
+
+  responses
+    PaymentInitiatedPayload
+      payment_id integer
+      status string
+      gateway_redirect_url string
+
+  actions
+    "Verify invoice_id belongs to the current tenant and is not already fully paid"
+    "For paysharp or paystack, confirm the gateway is enabled via FinancialPaymentGatewayConfiguration, then create a hosted payment session and return its gateway_redirect_url"
+    "For eft, store the uploaded proof_of_payment file and set status to Pending Verification"
+
+  returns
+    201 PaymentInitiatedPayload
+    403 "Missing permission to pay this invoice, or the selected gateway is not enabled"
+    409 "This invoice is already fully paid"
+    422 "Validation failed"
+
+endpoint PaymentGatewayWebhook "/api/financial/payments/webhook"
+  description "Receives asynchronous payment confirmation callbacks from Paysharp or Paystack"
+  version "1.0.0"
+  method "POST"
+
+  params
+    gateway enum["paysharp", "paystack"]
+    payload string
+    signature string
+
+  responses
+    WebhookProcessedPayload
+      payment_id integer
+      invoice_status string
+
+  actions
+    "Verify the signature against the tenant's stored gateway secret"
+      enforce "A webhook with an invalid or missing signature must be rejected before any data is written"
+    "Match the payload to its originating invoice and tenant"
+    "Record the payment and update the invoice's paid_total and status"
+
+  returns
+    200 WebhookProcessedPayload
+    400 "Invalid webhook signature"
+    404 "No matching invoice found for this payment"
+
+endpoint VerifyEftPayment "/financial/payments/{payment_id}/verify"
+  description "Lets a staff member approve a manually submitted EFT proof of payment"
+  version "1.0.0"
+  method "POST"
+
+  params
+    payment_id string
+
+  responses
+    PaymentVerifiedPayload
+      payment_id integer
+      invoice_status string
+
+  actions
+    "Verify the authenticated user has financial.payments.verify permission for this tenant"
+    "Confirm the payment is currently in Pending Verification status"
+      enforce "Only a payment in Pending Verification status may be approved through this endpoint"
+    "Mark the payment verified and update the invoice's paid_total and status"
+
+  returns
+    200 PaymentVerifiedPayload
+    403 "Missing permission to verify payments"
+    409 "This payment is not awaiting verification"
+
+endpoint StoreCategory "/support/categories"
+  description "Creates or updates a Tier 2 subcategory beneath a fixed Tier 1 parent_category"
+  version "1.0.0"
+  method "POST"
+
+  params
+    parent_category enum["account_access", "billing_subscription", "crm_modules", "erp_modules", "integrations_data", "reporting_analytics", "performance_stability", "feature_request", "general_inquiry"]
+    slug string
+    display_name string
+    is_active boolean
+
+  responses
+    CategoryPayload
+      category_id integer
+      parent_category string
+      slug string
+      display_name string
+
+  actions
+    "Verify the authenticated user has support.categories.manage permission for this tenant"
+    "Validate slug is snake_case and unique within its parent_category"
+    "Create or update the subcategory scoped to the current tenant"
+
+  returns
+    201 CategoryPayload
+    403 "Missing permission to manage categories"
+    422 "Validation failed"
+
+endpoint ListCategories "/support/categories"
+  description "Returns active Tier 2 subcategories for cascading dropdowns, optionally filtered by a Tier 1 parent_category"
+  version "1.0.0"
+  method "GET"
+
+  params
+    parent_category enum["account_access", "billing_subscription", "crm_modules", "erp_modules", "integrations_data", "reporting_analytics", "performance_stability", "feature_request", "general_inquiry"]
+
+  responses
+    CategoryListPayload
+      category_count integer
+
+  actions
+    "Load active subcategories scoped to the current tenant, filtered by parent_category when supplied"
+    "Exclude any subcategory whose parent_category maps to a module the tenant has not enabled"
+
+  returns
+    200 CategoryListPayload
+
+endpoint StoreTicket "/api/support/tickets"
+  description "Creates a new support ticket for the current tenant using the relational Tier 1 and Tier 2 category structure"
+  version "1.0.0"
+  method "POST"
+
+  params
+    customer_id string
+    channel enum["web_form", "email"]
+    parent_category enum["account_access", "billing_subscription", "crm_modules", "erp_modules", "integrations_data", "reporting_analytics", "performance_stability", "feature_request", "general_inquiry"]
+    subcategory_slug string
+    impact enum["single_user", "department", "organisation"]
+    subject string
+
+  responses
+    TicketCreatedPayload
+      ticket_id integer
+      reference string
+      status string
+      priority string
+
+  actions
+    "Verify customer_id exists in Core's shared customer directory and belongs to the current tenant, or create it there if the requester is new"
+    "Validate subcategory_slug is an active SupportCategoryManagement entry under parent_category"
+    "Create the ticket in Open status with the given priority computed via SupportRoutingAndSla"
+    "Route the ticket via SupportRoutingAndSla"
+
+  returns
+    201 TicketCreatedPayload
+    422 "Validation failed"
+
+endpoint ClaimTicket "/support/tickets/{ticket_id}/claim"
+  description "Lets an agent claim an open ticket from their queue"
+  version "1.0.0"
+  method "POST"
+
+  params
+    ticket_id string
+
+  responses
+    TicketClaimedPayload
+      ticket_id integer
+      assigned_agent_id integer
+      status string
+
+  actions
+    "Verify the authenticated user has support.tickets.claim permission for this tenant"
+    "Confirm the ticket is currently Open"
+      enforce "Only an Open ticket may be claimed through this endpoint"
+    "Assign the ticket to the claiming agent and transition it to In Progress"
+
+  returns
+    200 TicketClaimedPayload
+    403 "Missing permission to claim tickets"
+    409 "This ticket has already been claimed"
+
+endpoint ReplyToTicket "/support/tickets/{ticket_id}/reply"
+  description "Appends a threaded reply to a ticket from either an agent or the requesting customer, updating its status accordingly"
+  version "1.0.0"
+  method "POST"
+
+  params
+    ticket_id string
+    author_id string
+    message string
+    is_agent_reply boolean
+
+  responses
+    ReplyAddedPayload
+      ticket_id integer
+      status string
+
+  actions
+    "Append the message to the ticket's threaded history"
+    "Transition the ticket to Pending Customer when an agent's reply requests more information"
+    "Transition the ticket back to In Progress, resuming the SLA resolution timer, when the customer replies"
+
+  returns
+    201 ReplyAddedPayload
+    404 "Ticket not found"
+
+endpoint EscalateTicket "/support/tickets/{ticket_id}/escalate"
+  description "Escalates a ticket identified as a genuine defect to the engineering team's issue tracker"
+  version "1.0.0"
+  method "POST"
+
+  params
+    ticket_id string
+    escalation_notes string
+
+  responses
+    TicketEscalatedPayload
+      ticket_id integer
+      bug_card_reference string
+      status string
+
+  actions
+    "Verify the authenticated user has support.tickets.escalate permission for this tenant"
+    "Create the linked bug card in the engineering issue tracker and transition the ticket to Pending Engineering"
+
+  returns
+    200 TicketEscalatedPayload
+    403 "Missing permission to escalate tickets"
+    404 "Ticket not found"
+
+endpoint ResolveTicket "/support/tickets/{ticket_id}/resolve"
+  description "Resolves a ticket with a root cause code and starts the customer verification window"
+  version "1.0.0"
+  method "POST"
+
+  params
+    ticket_id string
+    root_cause_code enum["user_error", "software_bug", "data_corruption", "configuration_issue", "third_party_outage"]
+
+  responses
+    TicketResolvedPayload
+      ticket_id integer
+      status string
+      verification_window_ends_at string
+
+  actions
+    "Verify the authenticated user has support.tickets.resolve permission for this tenant"
+    "Confirm the ticket's status is In Progress or Pending Engineering"
+      enforce "Only a ticket in In Progress or Pending Engineering status may be resolved through this endpoint"
+    "Transition the ticket to Resolved, record root_cause_code, and start the verification window"
+
+  returns
+    200 TicketResolvedPayload
+    403 "Missing permission to resolve tickets"
+    409 "This ticket is not in a resolvable status"
+
+endpoint AddTicketNote "/support/tickets/{ticket_id}/notes"
+  description "Adds a private internal note to a support ticket"
+  version "1.0.0"
+  method "POST"
+
+  params
+    ticket_id string
+    note string
+    mentioned_user_ids array[string]
+
+  responses
+    NoteAddedPayload
+      note_id integer
+      ticket_id integer
+
+  actions
+    "Verify the authenticated user has support.tickets.view permission for this tenant"
+    "Attach the note to the ticket's internal thread"
+    "Notify each mentioned user via CoreNotifications"
+
+  returns
+    201 NoteAddedPayload
+    403 "Missing permission to add notes to this ticket"
+    404 "Ticket not found"
