@@ -12,7 +12,7 @@ use Modules\Core\Terminology\TerminologyService;
 use Modules\Core\Theming\ThemeService;
 
 /**
- * REPLACES overlay 7. Shares what every tenant page needs: tenant, user, permissions, modules, theme.
+ * REPLACES overlay 8 (overlay 12 adds the `operator` prop on the admin host). Shares what every tenant page needs: tenant, user, permissions, modules, theme.
  *
  * IMPORTANT: Inertia calls share() BEFORE the route middleware (TenantMiddleware) has run, so the
  * tenant is not yet on the request. Every prop is therefore a closure, resolved later when the
@@ -43,6 +43,15 @@ final class HandleInertiaRequests extends Middleware
             'terms' => fn () => $tenant() ? app(TerminologyService::class)->all() : null,
             // Components other modules plugged into published hooks, for the modules enabled for this tenant.
             'extensions' => fn () => $user() ? app(ExtensionResolver::class)->all() : [],
+            // Only on the admin host: the signed-in operator and what they may do. Never shared on tenant hosts.
+            'operator' => function () use ($request) {
+                if (! app(\App\Tenancy\TenantResolver::class)->isControlPlaneHost($request->getHost())) {
+                    return null;
+                }
+                $op = auth('operator')->user();
+
+                return $op ? ['name' => $op->name, 'email' => $op->email, 'permissions' => $op->permissions()] : null;
+            },
             'flash' => ['status' => fn () => $request->session()->get('status')],
         ]);
     }

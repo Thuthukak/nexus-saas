@@ -44,6 +44,10 @@ return [
             'driver' => 'session', 
             'provider' => 'portal_users'
         ],
+        'operator'  => [
+            'driver' => 'session', 
+            'provider' => 'operators'
+        ],
     ],
 
     /*
@@ -66,6 +70,7 @@ return [
     'providers' => [
         'users'        => ['driver' => 'eloquent', 'model' => Modules\Core\Models\User::class],
         'portal_users' => ['driver' => 'eloquent', 'model' => Modules\Core\Models\PortalUser::class],
+        'operators' => ['driver' => 'eloquent', 'model' => App\Platform\ControlPlane\Operator::class],
     ],
 
     /*

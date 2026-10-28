@@ -109,5 +109,5 @@ it('does not share the user or tenant with the public signup page', function () 
 });
 
 it('serves the signup page only on the root domain', function () {
-    $this->get('http://admin.platform.test/')->assertNotFound();
+    $this->get('http://nonexistent.platform.test/')->assertNotFound();
 });

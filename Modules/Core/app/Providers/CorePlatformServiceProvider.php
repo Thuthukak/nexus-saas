@@ -47,7 +47,7 @@ use Modules\Core\Parties\Party;
 use Modules\Core\Permissions\PermissionKey;
 use Modules\Core\Permissions\RolePolicy;
 use Modules\Core\Permissions\TenantAdminGrants;
-use Modules\Core\Services\CoreTenantSeeder;
+use Modules\Core\Services\CoreTenantSeeder; 
 use Modules\Core\Records\OpenEntityRegistry;
 use Modules\Core\Reporting\CoreCustomersMetricSource;
 use Modules\Core\Reporting\ReportingRegistry;
@@ -62,6 +62,7 @@ use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use App\Kernel\Dtos\ModuleStateChanged;
 use Modules\Core\Permissions\PermissionCatalogue;
+
 
 /**
  * REPLACES the overlay-10 file. Overlay 11 adds inbound email routing (CoreInboundEmailRouting).
@@ -87,6 +88,7 @@ final class CorePlatformServiceProvider extends ServiceProvider
         $this->app->bind(TerminologyService::class);
         $this->app->bind(TerminologyResolver::class, TerminologyService::class);
         $this->app->bind(PartyDirectory::class, PartyDirectoryService::class);
+        $this->app->bind(\App\Kernel\Contracts\TenantAdminDirectory::class, \Modules\Core\Services\TenantAdminDirectoryService::class);   // control plane -> tenant admins
 
         // Extension points + record extensions. Hooks are published in register() (not boot()) so they
         // exist before ANY module provider's boot() tries to register a component against them.
@@ -167,6 +169,7 @@ final class CorePlatformServiceProvider extends ServiceProvider
             } elseif (method_exists($registrar, 'clearClassPermissions')) {
                 $registrar->clearClassPermissions();
             }
+
         });
 
         // Cross-module input arrives by event only.
@@ -178,8 +181,9 @@ final class CorePlatformServiceProvider extends ServiceProvider
         $this->app->make(PermissionCatalogue::class)->register('Core', CoreTenantSeeder::TENANT_ADMIN_PERMISSIONS);
         Event::listen(ModuleStateChanged::class, fn (ModuleStateChanged $e) => app(TenantAdminGrants::class)->sync($e->tenantId()));
 
+
         Gate::policy(Role::class, RolePolicy::class);
-        
+
         Gate::before(function ($user, string $ability, array $arguments = []) {
             $subject = $arguments[0] ?? null;
             if ($subject instanceof Role && $subject->name === PermissionKey::SUPER_ADMIN_ROLE) {
