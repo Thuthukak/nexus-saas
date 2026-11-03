@@ -47,7 +47,7 @@ use Modules\Core\Parties\Party;
 use Modules\Core\Permissions\PermissionKey;
 use Modules\Core\Permissions\RolePolicy;
 use Modules\Core\Permissions\TenantAdminGrants;
-use Modules\Core\Services\CoreTenantSeeder; 
+use Modules\Core\Services\CoreTenantSeeder;
 use Modules\Core\Records\OpenEntityRegistry;
 use Modules\Core\Reporting\CoreCustomersMetricSource;
 use Modules\Core\Reporting\ReportingRegistry;
@@ -62,7 +62,6 @@ use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use App\Kernel\Dtos\ModuleStateChanged;
 use Modules\Core\Permissions\PermissionCatalogue;
-
 
 /**
  * REPLACES the overlay-10 file. Overlay 11 adds inbound email routing (CoreInboundEmailRouting).
@@ -89,6 +88,7 @@ final class CorePlatformServiceProvider extends ServiceProvider
         $this->app->bind(TerminologyResolver::class, TerminologyService::class);
         $this->app->bind(PartyDirectory::class, PartyDirectoryService::class);
         $this->app->bind(\App\Kernel\Contracts\TenantAdminDirectory::class, \Modules\Core\Services\TenantAdminDirectoryService::class);   // control plane -> tenant admins
+        $this->app->bind(\App\Kernel\Contracts\WorkspaceUserCounter::class, \Modules\Core\Services\TenantAdminDirectoryService::class);   // plan management -> seat counting
 
         // Extension points + record extensions. Hooks are published in register() (not boot()) so they
         // exist before ANY module provider's boot() tries to register a component against them.
@@ -152,10 +152,14 @@ final class CorePlatformServiceProvider extends ServiceProvider
 
         ThemeService::registerSettings($this->app->make(SettingRegistry::class));
         $this->app->make(NotificationTypeRegistry::class)->register(NotifyAdminsOfUsageThreshold::TYPE, inApp: true, email: true);
+        foreach (\App\Kernel\Dtos\BillingNotificationTypes::ALL as $billingType) {
+            $this->app->make(NotificationTypeRegistry::class)->register($billingType, inApp: true, email: true);
+        }
 
         // Roles are tenant-scoped: point Spatie's "team" AND its cache at the current tenant.
         // RLS filters each permission's roles to the active tenant, so one shared cache would
         // hold whichever tenant loaded first and deny (or mis-grant) everyone else.
+        // Roles are tenant-scoped: point Spatie's "team" at the current tenant.
         Event::listen(TenantContextSet::class, function (TenantContextSet $e): void {
             $registrar = app(PermissionRegistrar::class);
 
@@ -169,7 +173,6 @@ final class CorePlatformServiceProvider extends ServiceProvider
             } elseif (method_exists($registrar, 'clearClassPermissions')) {
                 $registrar->clearClassPermissions();
             }
-
         });
 
         // Cross-module input arrives by event only.

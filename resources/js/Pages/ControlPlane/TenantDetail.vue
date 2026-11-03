@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { Head, Link, useForm } from '@inertiajs/vue3'
 import Layout from '../../Layouts/ControlPlaneLayout.vue'
 
-const props = defineProps({ tenant: Object, domains: Array, subscription: Object, history: Array, can: Object })
+const props = defineProps({ tenant: Object, domains: Array, subscription: Object, history: Array, invoices: Array, can: Object })
 const form = useForm({ reason: '' })
 const suspended = computed(() => props.tenant.status === 'suspended')
 const action = computed(() => (suspended.value ? 'reinstate' : 'suspend'))
@@ -25,6 +25,7 @@ function submit() {
       <dt>Country / currency</dt><dd>{{ tenant.country_code }} / {{ tenant.billing_currency }}</dd>
       <dt>Plan</dt><dd>{{ subscription ? `${subscription.plan_name} (${subscription.billing_cycle}, ${subscription.status})` : '-' }}</dd>
     </dl>
+    <p v-if="subscription?.status === 'past_due'" class="error" role="alert">Payment overdue since {{ String(subscription.past_due_since).slice(0, 10) }}.</p>
     <h2>Domains</h2>
     <ul class="list"><li v-for="d in domains" :key="d.domain">{{ d.domain }} <span class="muted">{{ d.verified_at ? 'verified' : 'unverified' }}{{ d.is_active ? '' : ', inactive' }}</span></li>
       <li v-if="!domains.length" class="muted">No custom domains.</li></ul>
@@ -39,6 +40,20 @@ function submit() {
       </div>
       <button class="btn" type="submit" :disabled="form.processing || !form.reason.trim()">{{ suspended ? 'Reinstate' : 'Suspend' }}</button>
     </form>
+
+    <template v-if="can.billing">
+      <h2>Invoices</h2>
+      <table class="table">
+        <thead><tr><th>Number</th><th>Plan</th><th>Amount</th><th>Issued</th></tr></thead>
+        <tbody>
+          <tr v-for="i in invoices" :key="i.number">
+            <td>{{ i.number }}</td><td>{{ i.plan_key }} ({{ i.billing_cycle }})</td>
+            <td>{{ i.currency }} {{ (i.amount_minor / 100).toFixed(2) }}</td><td>{{ String(i.issued_at).slice(0, 10) }}</td>
+          </tr>
+          <tr v-if="!invoices.length"><td colspan="4" class="muted">No invoices yet.</td></tr>
+        </tbody>
+      </table>
+    </template>
 
     <h2>Status history</h2>
     <table class="table">

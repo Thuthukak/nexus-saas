@@ -12,3 +12,8 @@ Schedule::command('reports:refresh-summaries')->everyFiveMinutes()->withoutOverl
 
 Schedule::command('email:poll-inbound')->everyMinute()->withoutOverlapping();
 Schedule::command('email:prune-inbound-log')->daily();
+
+// make sure php artisan schedule:run runs every minute from cron
+Schedule::call(function () {
+    Artisan::call('schedule:run');
+})->everyMinute();

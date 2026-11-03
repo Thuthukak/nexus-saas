@@ -6,6 +6,7 @@ namespace Modules\Core\Permissions;
 
 use App\Tenancy\TenantContext;
 use Illuminate\Support\Facades\DB;
+use Spatie\Permission\Models\Role;
 
 /** Tenant Admin holds exactly the permissions of the modules enabled for its tenant. Idempotent. */
 final class TenantAdminGrants
@@ -23,8 +24,7 @@ final class TenantAdminGrants
             ->where('tenant_id', $tenantId)->where('is_enabled', true)
             ->pluck('module_key')->all();
 
-        // Core is mandatory and can never be disabled, so it counts as enabled even
-        // before its tenant_modules row exists (e.g. a tenant created without signup).
+        // Core is mandatory and can never be disabled, so it always counts.
         $modules = array_values(array_unique(['Core', ...$enabled]));
 
         $previous = $this->context->id();
@@ -34,7 +34,10 @@ final class TenantAdminGrants
             $this->perms->ensureSuperAdmin();
             $this->perms->upsertRole('Tenant Admin');
 
-            foreach ($this->catalogue->forModules($modules) as $key) {
+            // Only attach what the role does not already hold: repeat syncs become one query.
+            $held = Role::findByName('Tenant Admin', 'workspace')->permissions()->pluck('name')->all();
+
+            foreach (array_diff($this->catalogue->forModules($modules), $held) as $key) {
                 $this->perms->attach('Tenant Admin', $key);
             }
         });

@@ -41,7 +41,9 @@ final class TenantAdminController
         if ($detail === null) {
             return response()->json(['message' => 'Tenant not found'], 404);
         }
-        $detail['can'] = ['suspend' => $operator->hasPermission(P::TENANTS_SUSPEND), 'reinstate' => $operator->hasPermission(P::TENANTS_REINSTATE)];
+        $billing = $operator->hasPermission(P::BILLING_VIEW);
+        $detail['invoices'] = $billing ? $detail['invoices'] : [];
+        $detail['can'] = ['billing' => $billing, 'suspend' => $operator->hasPermission(P::TENANTS_SUSPEND), 'reinstate' => $operator->hasPermission(P::TENANTS_REINSTATE)];
 
         return $request->expectsJson() ? response()->json($detail) : Inertia::render('ControlPlane/TenantDetail', $detail);
     }

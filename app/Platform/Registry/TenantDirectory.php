@@ -52,7 +52,9 @@ final class TenantDirectory
             'domains' => DB::table('tenant_domains')->where('tenant_id', $tenantId)->orderBy('created_at')->get(['domain', 'verified_at', 'is_active']),
             'subscription' => DB::table('tenant_subscriptions as s')->join('plans as p', 'p.id', '=', 's.plan_id')
                 ->where('s.tenant_id', $tenantId)->orderByDesc('s.created_at')
-                ->first(['p.key as plan', 'p.name as plan_name', 's.billing_cycle', 's.currency', 's.status', 's.current_period_end']),
+                ->first(['p.key as plan', 'p.name as plan_name', 's.billing_cycle', 's.currency', 's.status', 's.current_period_end', 's.past_due_since', 's.processor']),
+            'invoices' => DB::table('platform_invoices')->where('tenant_id', $tenantId)->orderByDesc('issued_at')->limit(12)
+                ->get(['number', 'plan_key', 'billing_cycle', 'currency', 'amount_minor', 'status', 'issued_at']),
             'history' => DB::table('tenant_status_events as e')->leftJoin('operators as o', 'o.id', '=', 'e.operator_id')
                 ->where('e.tenant_id', $tenantId)->orderByDesc('e.id')->limit(20)
                 ->get(['e.from_status', 'e.to_status', 'e.reason', 'e.actor', 'e.created_at', 'o.name as operator_name']),

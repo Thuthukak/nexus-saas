@@ -10,6 +10,7 @@ final class ControlPlanePermission
     public const TENANTS_VIEW = 'control_plane.tenants.view';
     public const TENANTS_SUSPEND = 'control_plane.tenants.suspend';
     public const TENANTS_REINSTATE = 'control_plane.tenants.reinstate';
+    public const BILLING_VIEW = 'control_plane.billing.view';
     public const ALL = 'control_plane.*';
 
     private const HELD = '/^control_plane\.(\*|[a-z_]+\.(\*|[a-z_]+))$/D';
